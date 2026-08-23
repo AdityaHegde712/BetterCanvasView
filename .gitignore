@@ -5,3 +5,14 @@
 .env
 .env.*
 !.env.example
+
+# Node and WXT outputs
+node_modules/
+.wxt/
+.output/
+dist/
+*.log
+
+# Browser test outputs
+playwright-report/
+test-results/
