@@ -1,0 +1,7 @@
+# Local planning artifacts
+.agent-tasks/
+
+# Local secrets
+.env
+.env.*
+!.env.example
