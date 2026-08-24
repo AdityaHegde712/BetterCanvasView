@@ -157,12 +157,15 @@ Each incomplete, visible agenda item belongs to exactly one ordered bucket:
 overdue, today, tomorrow, days 2-7, days 8-14, day 15 onward, or undated.
 Earlier-today deadlines are overdue. Calendar-day boundaries use Pacific time,
 while overdue comparison uses the exact instant. Due labels include the Canvas
-date, time, and PST/PDT abbreviation.
+date, time, and PST/PDT abbreviation. The dashboard renders only buckets that
+contain at least one visible item.
 
 Announcements are grouped by enabled course and sorted newest first. The stored
 Canvas message remains inert data; `DOMParser` removes executable/non-visible
 elements and React renders only normalized text. Deep links render only after
-exact-origin validation.
+exact-origin validation. Presentation selectors omit valid announcement
+timestamps strictly older than 365 days from both visible and hidden views;
+cached records are retained.
 
 ## 8. Non-Obvious Patterns
 

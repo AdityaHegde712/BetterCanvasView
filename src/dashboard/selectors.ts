@@ -24,6 +24,7 @@ export const AGENDA_BUCKET_ORDER: readonly AgendaBucket[] = [
 ];
 
 const STALE_AFTER_MS = 2 * 60 * 60 * 1_000;
+const ANNOUNCEMENT_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1_000;
 
 const AGENDA_BUCKET_LABELS: Record<AgendaBucket, string> = {
   overdue: "Overdue",
@@ -169,12 +170,40 @@ export function selectAgendaBuckets(
   }));
 }
 
+/** Selects canonical agenda buckets that contain at least one item. */
+export function selectNonEmptyAgendaBuckets(
+  items: AgendaItemRecord[],
+  now: Date,
+): AgendaBucketView[] {
+  return selectAgendaBuckets(items, now).filter(
+    (bucket) => bucket.items.length > 0,
+  );
+}
+
+/** Keeps announcements within one year, including those with unknown age. */
+function isRecentAnnouncement(
+  announcement: AnnouncementRecord,
+  now: Date,
+): boolean {
+  if (announcement.posted_at === null) {
+    return true;
+  }
+
+  const postedAtTime = Date.parse(announcement.posted_at);
+  if (Number.isNaN(postedAtTime)) {
+    return false;
+  }
+
+  return postedAtTime >= now.getTime() - ANNOUNCEMENT_MAX_AGE_MS;
+}
+
 /** Groups enabled-course announcements and orders each group newest first. */
 export function selectAnnouncementsByCourse(
   courses: CourseRecord[],
   preferences: CoursePreference[],
   announcements: AnnouncementRecord[],
   itemStates: ItemState[] = [],
+  now: Date = new Date(),
 ): AnnouncementCourseGroup[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
@@ -192,7 +221,8 @@ export function selectAnnouncementsByCourse(
         .filter(
           (announcement) =>
             announcement.course_id === course.course_id &&
-            statesById.get(announcement.id)?.hidden !== true,
+            statesById.get(announcement.id)?.hidden !== true &&
+            isRecentAnnouncement(announcement, now),
         )
         .map((announcement) => ({
           ...announcement,
@@ -223,6 +253,7 @@ export function selectHiddenAnnouncements(
   preferences: CoursePreference[],
   announcements: AnnouncementRecord[],
   itemStates: ItemState[],
+  now: Date = new Date(),
 ): HiddenAnnouncementView[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
@@ -234,7 +265,8 @@ export function selectHiddenAnnouncements(
     .filter(
       (announcement) =>
         enabledCourseIds.has(getCourseRecordId(announcement.course_id)) &&
-        statesById.get(announcement.id)?.hidden === true,
+        statesById.get(announcement.id)?.hidden === true &&
+        isRecentAnnouncement(announcement, now),
     )
     .map((announcement) => ({
       ...announcement,
