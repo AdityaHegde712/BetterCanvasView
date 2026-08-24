@@ -62,5 +62,8 @@ export interface SyncMetadata {
     | "network_error"
     | "rate_limited"
     | "invalid_response";
+  course_count?: number;
+  agenda_item_count?: number;
+  announcement_count?: number;
   error_code?: string;
 }

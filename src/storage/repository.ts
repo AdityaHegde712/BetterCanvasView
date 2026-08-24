@@ -9,6 +9,7 @@ import type {
   AgendaItemRecord,
   AnnouncementRecord,
   CourseRecord,
+  SyncMetadata,
 } from "../domain/models";
 import { CanvasDatabase } from "./database";
 
@@ -29,11 +30,13 @@ export interface RemoteSnapshotInput {
  *
  * @param database - The Canvas database to update.
  * @param snapshot - The complete set of remote records from Canvas.
+ * @param metadata - Successful synchronization metadata committed atomically.
  * @returns A promise that resolves after the replacement commits.
  */
 export async function replaceRemoteSnapshot(
   database: CanvasDatabase,
   snapshot: RemoteSnapshotInput,
+  metadata?: SyncMetadata,
 ): Promise<void> {
   const agendaItems = snapshot.agenda_items.map(normalizeAgendaItem);
 
@@ -43,6 +46,7 @@ export async function replaceRemoteSnapshot(
     database.agenda_items,
     database.announcements,
     database.course_preferences,
+    database.sync_metadata,
     async () => {
       const existingPreferences = await database.course_preferences.bulkGet(
         snapshot.courses.map(({ id }) => id),
@@ -58,8 +62,25 @@ export async function replaceRemoteSnapshot(
       await database.agenda_items.bulkPut(agendaItems);
       await database.announcements.bulkPut(snapshot.announcements);
       await database.course_preferences.bulkPut(newPreferences);
+      if (metadata !== undefined) {
+        await database.sync_metadata.put(metadata);
+      }
     },
   );
+}
+
+/**
+ * Persists synchronization metadata without changing the remote snapshot.
+ *
+ * @param database - The Canvas database to update.
+ * @param metadata - Latest synchronization attempt metadata.
+ * @returns A promise that resolves after the metadata is upserted.
+ */
+export async function saveSyncMetadata(
+  database: CanvasDatabase,
+  metadata: SyncMetadata,
+): Promise<void> {
+  await database.sync_metadata.put(metadata);
 }
 
 /**
