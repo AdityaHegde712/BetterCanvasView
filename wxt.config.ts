@@ -11,8 +11,18 @@ export default defineConfig({
     description: "A local, read-only SJSU Canvas agenda dashboard.",
     permissions: ["alarms"],
     host_permissions: ["https://sjsu.instructure.com/*"],
+    icons: {
+      16: "icon-16.png",
+      48: "icon-48.png",
+      128: "icon-128.png",
+    },
     action: {
       default_title: "Open Better Canvas View",
+      default_icon: {
+        16: "icon-16.png",
+        48: "icon-48.png",
+        128: "icon-128.png",
+      },
     },
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'self'",
