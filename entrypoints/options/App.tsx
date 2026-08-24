@@ -10,6 +10,7 @@ import {
   Container,
   Divider,
   Group,
+  Image,
   Modal,
   Paper,
   Stack,
@@ -19,14 +20,14 @@ import {
   Title,
 } from "@mantine/core";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { AgendaItemRecord, ItemState } from "../../src/domain/models";
 import {
-  selectAgendaBuckets,
   selectAnnouncementsByCourse,
   selectHiddenAnnouncements,
   selectHiddenItems,
+  selectNonEmptyAgendaBuckets,
   selectVisibleAgendaItems,
   shouldShowStaleWarning,
 } from "../../src/dashboard/selectors";
@@ -44,6 +45,7 @@ import {
 import { getTrustedCanvasUrl } from "../../src/security/canvas-links";
 
 const CANVAS_HOME = "https://sjsu.instructure.com/";
+const REFRESH_SUCCESS_VISIBLE_MS = 4_000;
 
 interface AppProps {
   database: CanvasDatabase;
@@ -172,6 +174,7 @@ export function App({
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState<boolean>(false);
+  const dashboardNow = now_fn();
   const filters: AgendaFilters = {
     course_ids: selectedCourseIds,
     title_query: titleQuery,
@@ -188,18 +191,32 @@ export function App({
     preferences,
     announcements,
     itemStates,
+    dashboardNow,
   );
-  const agendaBuckets = selectAgendaBuckets(visibleItems, now_fn());
+  const agendaBuckets = selectNonEmptyAgendaBuckets(visibleItems, dashboardNow);
   const announcementGroups = selectAnnouncementsByCourse(
     courses,
     preferences,
     announcements,
     itemStates,
+    dashboardNow,
   );
   const courseNameById = new Map(
     courses.map((course) => [course.course_id, course.name]),
   );
-  const dataIsStale = shouldShowStaleWarning(metadata, now_fn());
+  const dataIsStale = shouldShowStaleWarning(metadata, dashboardNow);
+
+  useEffect(() => {
+    if (refreshStatus !== "Refresh complete") {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRefreshStatus(null);
+    }, REFRESH_SUCCESS_VISIBLE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [refreshStatus]);
 
   function toggleCourseFilter(courseId: string, checked: boolean): void {
     setSelectedCourseIds((currentIds) => {
@@ -278,12 +295,20 @@ export function App({
     <Container component="main" size="xl" py="md">
       <Stack gap="md">
         <Group justify="space-between">
-          <div>
-            <Title order={1}>Better Canvas View</Title>
-            <Text c="dimmed" size="sm">
-              Your local Canvas agenda
-            </Text>
-          </div>
+          <Group gap="sm" wrap="nowrap">
+            <Image
+              alt="Better Canvas View icon"
+              height={48}
+              src="/icon-48.png"
+              width={48}
+            />
+            <div>
+              <Title order={1}>Better Canvas View</Title>
+              <Text c="dimmed" size="sm">
+                Your local Canvas agenda
+              </Text>
+            </div>
+          </Group>
           <Button
             type="button"
             loading={isRefreshing}
@@ -292,7 +317,14 @@ export function App({
             Refresh
           </Button>
         </Group>
-        {refreshStatus !== null && <Text role="status">{refreshStatus}</Text>}
+        {refreshStatus !== null && (
+          <Alert
+            color={refreshStatus === "Refresh complete" ? "green" : "red"}
+            role="status"
+          >
+            {refreshStatus}
+          </Alert>
+        )}
         {dataIsStale && (
           <Alert color="yellow" role="alert" title="Data may be stale">
             <Group gap="xs">

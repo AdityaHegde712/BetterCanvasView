@@ -14,9 +14,12 @@ organization preferences only in the extension's IndexedDB database.
 - Assignment, Classic Quiz, New Quiz, external-tool, and due-dated graded
   discussion support, including work omitted from the Canvas final grade.
 - Separate announcements view with inert plain-text excerpts.
+- Announcements older than 365 days are omitted from visible and hidden views.
 - Search, multi-course filtering, per-course enablement, notes, and reversible
   assignment or announcement hiding.
 - Cached data with manual, startup, and hourly refresh plus stale/login states.
+- Non-empty agenda sections, dashboard branding, and transient refresh success
+  feedback keep the interface compact.
 
 ## Privacy and Scope
 
