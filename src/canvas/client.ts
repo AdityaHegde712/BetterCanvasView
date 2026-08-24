@@ -166,7 +166,10 @@ export class CanvasHttpClient implements CanvasClient {
       throw new RangeError("max_attempts must be a positive integer.");
     }
 
-    this.#fetchFn = options.fetch_fn ?? fetch;
+    this.#fetchFn =
+      options.fetch_fn ??
+      ((input: RequestInfo | URL, init?: RequestInit) =>
+        globalThis.fetch(input, init));
     this.#sleepFn = options.sleep_fn ?? defaultSleep;
     this.#maxAttempts = maxAttempts;
   }

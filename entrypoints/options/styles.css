@@ -1,29 +1,27 @@
-/** Defines global dashboard colors and layout. */
+/** Defines the compact, token-based dark dashboard appearance. */
 
 :root {
   color: #e0e0e0;
   background: #121212;
   color-scheme: dark;
 }
-
 html,
 body,
 #root {
   min-height: 100%;
   margin: 0;
 }
-
 body {
-  background:
-    radial-gradient(
-      circle at top right,
-      rgb(80 74 200 / 10%),
-      transparent 34rem
-    ),
-    #121212;
+  background: #121212;
 }
-
-.mantine-Paper-root {
+.mantine-Paper-root,
+.mantine-Dialog-root {
   background-color: #1e1e1e;
   border-color: #2a2a2a;
+}
+.dashboard-row {
+  border-color: #2a2a2a;
+}
+.note-input {
+  flex: 1;
 }
