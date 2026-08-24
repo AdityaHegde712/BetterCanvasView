@@ -75,20 +75,21 @@ a failed run cannot poison the queue.
 
 ## 4. Key Modules
 
-| Path                          | Architectural responsibility                                                |
-| :---------------------------- | :-------------------------------------------------------------------------- |
-| `src/canvas/client.ts`        | Fixed-origin GET client, response/auth validation, retries, and pagination. |
-| `src/canvas/pagination.ts`    | Extracts opaque `rel=next` continuation URLs.                               |
-| `src/sync/sync-service.ts`    | Fetches complete course snapshots and owns commit/failure semantics.        |
-| `src/sync/runtime.ts`         | Adapts alarms/messages to serialized synchronization triggers.              |
-| `src/domain/normalization.ts` | Converts Canvas payloads into stable snake_case records.                    |
-| `src/domain/submissions.ts`   | Classifies submitted, graded, pending-review, and excused work.             |
-| `src/domain/agenda.ts`        | Assigns each due date to one Pacific-time agenda bucket.                    |
-| `src/storage/database.ts`     | Defines the versioned six-store Dexie schema.                               |
-| `src/storage/repository.ts`   | Owns atomic snapshot replacement and local-state mutations.                 |
-| `src/dashboard/selectors.ts`  | Purely derives enabled, visible, hidden, grouped, and stale views.          |
-| `entrypoints/options/App.tsx` | Renders dashboard workflows and transient UI state.                         |
-| `src/security/`               | Converts Canvas markup to text and validates exact-origin links.            |
+| Path                               | Architectural responsibility                                                |
+| :--------------------------------- | :-------------------------------------------------------------------------- |
+| `src/canvas/client.ts`             | Fixed-origin GET client, response/auth validation, retries, and pagination. |
+| `src/canvas/pagination.ts`         | Extracts opaque `rel=next` continuation URLs.                               |
+| `src/sync/sync-service.ts`         | Fetches complete course snapshots and owns commit/failure semantics.        |
+| `src/sync/runtime.ts`              | Adapts alarms/messages to serialized synchronization triggers.              |
+| `src/domain/normalization.ts`      | Converts Canvas payloads into stable snake_case records.                    |
+| `src/domain/submissions.ts`        | Classifies submitted, graded, pending-review, and excused work.             |
+| `src/domain/agenda.ts`             | Assigns each due date to one Pacific-time agenda bucket.                    |
+| `src/storage/database.ts`          | Defines the versioned six-store Dexie schema.                               |
+| `src/storage/repository.ts`        | Owns atomic snapshot replacement and local-state mutations.                 |
+| `src/dashboard/selectors.ts`       | Purely derives enabled, visible, hidden, grouped, and stale views.          |
+| `src/dashboard/item-state-keys.ts` | Isolates local state when Canvas object-type IDs collide.                   |
+| `entrypoints/options/App.tsx`      | Renders dashboard workflows and transient UI state.                         |
+| `src/security/`                    | Converts Canvas markup to text and validates exact-origin links.            |
 
 > [!WARNING]
 > Changes to `src/domain/submissions.ts` can silently hide outstanding work.
@@ -110,7 +111,8 @@ a failed run cannot poison the queue.
 course it serially requests assignments with submission state and discussion
 topics restricted to announcements. `CanvasHttpClient.getAll()` follows only
 absolute `https://sjsu.instructure.com/api/v1/...` next links, detects cycles,
-and rejects off-origin, relative, or non-API continuations.
+and rejects off-origin, relative, or non-API continuations. Every fetch wait is
+bounded to 30 seconds so a stalled request cannot hold later refreshes.
 
 Response behavior:
 
@@ -125,7 +127,8 @@ Response behavior:
 Assignments, Classic Quizzes, New Quizzes, external tools, and due-dated graded
 discussions normalize into agenda items. Undated discussions remain excluded.
 `omit_from_final_grade` does not exclude an otherwise actionable assignment.
-Canvas submission state is authoritative after a successful refresh.
+Canvas submission state is authoritative after a successful refresh. Invalid
+optional Canvas timestamps normalize to `null` before persistence.
 
 ## 6. Persistence Model
 
@@ -146,6 +149,10 @@ replaces only the three remote stores, creates enabled preferences for newly
 seen courses, and commits metadata in the same transaction. Local preferences,
 notes, and hidden state survive refreshes. Clear Data atomically clears all six
 stores but never touches Canvas or browser cookies.
+
+Agenda and announcement records retain their stable Canvas IDs. Local item state
+uses the same legacy ID when it is unambiguous; if both record types share an ID,
+typed `agenda:<id>` and `announcement:<id>` keys prevent hide/note collisions.
 
 ## 7. Dashboard Derivation
 

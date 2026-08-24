@@ -57,16 +57,18 @@ function getString(object: CanvasObject, key: string): string {
 }
 
 /**
- * Reads a nullable Canvas timestamp without coercing invalid values.
+ * Reads a nullable Canvas timestamp, excluding malformed date strings.
  *
  * @param object - Canvas object containing the timestamp.
  * @param key - Timestamp property name.
- * @returns Timestamp string or null.
+ * @returns Parseable timestamp string or null.
  */
 function getNullableString(object: CanvasObject, key: string): string | null {
   const value = object[key];
 
-  return typeof value === "string" ? value : null;
+  return typeof value === "string" && !Number.isNaN(Date.parse(value))
+    ? value
+    : null;
 }
 
 /**

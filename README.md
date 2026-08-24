@@ -17,7 +17,8 @@ organization preferences only in the extension's IndexedDB database.
 - Announcements older than 365 days are omitted from visible and hidden views.
 - Search, multi-course filtering, per-course enablement, notes, and reversible
   assignment or announcement hiding.
-- Cached data with manual, startup, and hourly refresh plus stale/login states.
+- Cached data with manual, startup, and hourly refresh plus stale/login states;
+  a timed-out Canvas request retains the prior complete snapshot.
 - Non-empty agenda sections, dashboard branding, and transient refresh success
   feedback keep the interface compact.
 

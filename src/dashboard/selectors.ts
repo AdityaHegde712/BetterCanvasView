@@ -12,6 +12,8 @@ import type {
   SyncMetadata,
 } from "../domain/models";
 import { announcementHtmlToText } from "../security/announcement-text";
+import { getItemState } from "./item-state-keys";
+import type { ItemStateRecordType } from "./item-state-keys";
 
 export const AGENDA_BUCKET_ORDER: readonly AgendaBucket[] = [
   "overdue",
@@ -24,7 +26,8 @@ export const AGENDA_BUCKET_ORDER: readonly AgendaBucket[] = [
 ];
 
 const STALE_AFTER_MS = 2 * 60 * 60 * 1_000;
-const ANNOUNCEMENT_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1_000;
+const CONTENT_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1_000;
+const NO_ITEM_STATE_COLLISIONS: ReadonlySet<string> = new Set();
 
 const AGENDA_BUCKET_LABELS: Record<AgendaBucket, string> = {
   overdue: "Overdue",
@@ -66,6 +69,16 @@ function indexItemStates(itemStates: ItemState[]): Map<string, ItemState> {
   return new Map(itemStates.map((state) => [state.id, state]));
 }
 
+/** Resolves state using typed keys only for IDs shared across record types. */
+function getRecordState(
+  statesById: ReadonlyMap<string, ItemState>,
+  recordType: ItemStateRecordType,
+  recordId: string,
+  collidingItemIds: ReadonlySet<string>,
+): ItemState | undefined {
+  return getItemState(statesById, recordType, recordId, collidingItemIds);
+}
+
 /** Creates a set of enabled stable course keys. */
 function getEnabledCourseIds(preferences: CoursePreference[]): Set<string> {
   return new Set(
@@ -97,6 +110,7 @@ export function selectVisibleAgendaItems(
   preferences: CoursePreference[],
   itemStates: ItemState[],
   filters: AgendaFilters,
+  collidingItemIds: ReadonlySet<string> = NO_ITEM_STATE_COLLISIONS,
 ): AgendaItemRecord[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
@@ -104,7 +118,8 @@ export function selectVisibleAgendaItems(
   return items.filter(
     (item) =>
       !item.is_complete &&
-      statesById.get(item.id)?.hidden !== true &&
+      getRecordState(statesById, "agenda", item.id, collidingItemIds)
+        ?.hidden !== true &&
       matchesAgendaFilters(item, enabledCourseIds, filters),
   );
 }
@@ -115,12 +130,19 @@ export function selectHiddenItems(
   preferences: CoursePreference[],
   itemStates: ItemState[],
   filters?: AgendaFilters,
+  collidingItemIds: ReadonlySet<string> = NO_ITEM_STATE_COLLISIONS,
+  now: Date = new Date(),
 ): AgendaItemRecord[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
 
   return items.filter((item) => {
-    if (item.is_complete || statesById.get(item.id)?.hidden !== true) {
+    if (
+      item.is_complete ||
+      !isRecentAgendaItem(item, now) ||
+      getRecordState(statesById, "agenda", item.id, collidingItemIds)
+        ?.hidden !== true
+    ) {
       return false;
     }
     if (filters !== undefined) {
@@ -175,9 +197,24 @@ export function selectNonEmptyAgendaBuckets(
   items: AgendaItemRecord[],
   now: Date,
 ): AgendaBucketView[] {
-  return selectAgendaBuckets(items, now).filter(
-    (bucket) => bucket.items.length > 0,
-  );
+  return selectAgendaBuckets(
+    items.filter((item) => isRecentAgendaItem(item, now)),
+    now,
+  ).filter((bucket) => bucket.items.length > 0);
+}
+
+/** Keeps due-dated agenda work within one year and preserves undated work. */
+function isRecentAgendaItem(item: AgendaItemRecord, now: Date): boolean {
+  if (item.due_at === null) {
+    return true;
+  }
+
+  const dueAtTime = Date.parse(item.due_at);
+  if (Number.isNaN(dueAtTime)) {
+    return false;
+  }
+
+  return dueAtTime >= now.getTime() - CONTENT_MAX_AGE_MS;
 }
 
 /** Keeps announcements within one year, including those with unknown age. */
@@ -194,7 +231,7 @@ function isRecentAnnouncement(
     return false;
   }
 
-  return postedAtTime >= now.getTime() - ANNOUNCEMENT_MAX_AGE_MS;
+  return postedAtTime >= now.getTime() - CONTENT_MAX_AGE_MS;
 }
 
 /** Groups enabled-course announcements and orders each group newest first. */
@@ -204,6 +241,7 @@ export function selectAnnouncementsByCourse(
   announcements: AnnouncementRecord[],
   itemStates: ItemState[] = [],
   now: Date = new Date(),
+  collidingItemIds: ReadonlySet<string> = NO_ITEM_STATE_COLLISIONS,
 ): AnnouncementCourseGroup[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
@@ -221,7 +259,12 @@ export function selectAnnouncementsByCourse(
         .filter(
           (announcement) =>
             announcement.course_id === course.course_id &&
-            statesById.get(announcement.id)?.hidden !== true &&
+            getRecordState(
+              statesById,
+              "announcement",
+              announcement.id,
+              collidingItemIds,
+            )?.hidden !== true &&
             isRecentAnnouncement(announcement, now),
         )
         .map((announcement) => ({
@@ -254,6 +297,7 @@ export function selectHiddenAnnouncements(
   announcements: AnnouncementRecord[],
   itemStates: ItemState[],
   now: Date = new Date(),
+  collidingItemIds: ReadonlySet<string> = NO_ITEM_STATE_COLLISIONS,
 ): HiddenAnnouncementView[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
@@ -265,7 +309,12 @@ export function selectHiddenAnnouncements(
     .filter(
       (announcement) =>
         enabledCourseIds.has(getCourseRecordId(announcement.course_id)) &&
-        statesById.get(announcement.id)?.hidden === true &&
+        getRecordState(
+          statesById,
+          "announcement",
+          announcement.id,
+          collidingItemIds,
+        )?.hidden === true &&
         isRecentAnnouncement(announcement, now),
     )
     .map((announcement) => ({
