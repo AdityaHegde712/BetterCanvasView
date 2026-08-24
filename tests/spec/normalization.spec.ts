@@ -73,6 +73,17 @@ describe("Canvas normalization", () => {
     expect(
       normalizeAssignment(fixture.course, fixture.assignments.external_tool),
     ).toMatchObject({ item_type: "external_tool" });
+
+    expect(
+      normalizeAssignment(fixture.course, {
+        ...fixture.assignments.discussion,
+        due_at: "2026-08-23T23:59:00Z",
+      }),
+    ).toMatchObject({
+      id: "101:202",
+      item_type: "assignment",
+      due_at: "2026-08-23T23:59:00Z",
+    });
   });
 
   it("normalizes announcements to snake_case records keyed by Canvas IDs", () => {

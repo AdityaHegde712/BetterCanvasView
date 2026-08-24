@@ -150,7 +150,10 @@ export function normalizeAssignment(
     throw new TypeError("assignment must be a Canvas-shaped object.");
   }
 
-  if (hasSubmissionType(assignment.submission_types, "discussion_topic")) {
+  if (
+    hasSubmissionType(assignment.submission_types, "discussion_topic") &&
+    (assignment.due_at === null || assignment.due_at === undefined)
+  ) {
     return null;
   }
 

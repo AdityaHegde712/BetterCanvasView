@@ -44,8 +44,16 @@ export default tseslint.config(
   },
   {
     files: ["tests/**/*.{ts,tsx}"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.webextensions,
+        ...globals.node,
+      },
+    },
     rules: {
       "@typescript-eslint/require-await": "off",
+      "react-hooks/rules-of-hooks": "off",
     },
   },
 );
