@@ -22,6 +22,37 @@ body {
 .dashboard-row {
   border-color: #2a2a2a;
 }
+.dashboard-header {
+  align-items: flex-start;
+}
+.dashboard-brand {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+.dashboard-brand-icon {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+}
+.dashboard-brand-copy {
+  min-width: 0;
+}
+.dashboard-title {
+  white-space: nowrap;
+}
+.dashboard-refresh {
+  flex: 0 0 auto;
+}
 .note-input {
   flex: 1;
+}
+
+@media (max-width: 36em) {
+  .dashboard-brand {
+    flex-basis: 100%;
+  }
+  .dashboard-title {
+    font-size: 1.75rem;
+    line-height: 1.2;
+  }
 }

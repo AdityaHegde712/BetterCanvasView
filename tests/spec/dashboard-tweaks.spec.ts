@@ -14,6 +14,7 @@ import type {
 import {
   selectAnnouncementsByCourse,
   selectHiddenAnnouncements,
+  selectHiddenItems,
   selectNonEmptyAgendaBuckets,
 } from "../../src/dashboard/selectors";
 
@@ -42,7 +43,7 @@ function announcement(id: string, postedAt: string): AnnouncementRecord {
 }
 
 /** Creates one incomplete agenda item for bucket-selection assertions. */
-function agendaItem(id: string, dueAt: string): AgendaItemRecord {
+function agendaItem(id: string, dueAt: string | null): AgendaItemRecord {
   return {
     course_id: COURSE.course_id,
     due_at: dueAt,
@@ -106,5 +107,40 @@ describe("dashboard presentation refinements", () => {
         items: [expect.objectContaining({ id: "101:201" })],
       }),
     ]);
+  });
+
+  it("shows dated agenda work only within the inclusive one-year window", () => {
+    const exactlyOneYearOld = agendaItem("201", "2025-08-24T12:00:00.000Z");
+    const olderThanOneYear = agendaItem("202", "2025-08-24T11:59:59.999Z");
+    const undated = agendaItem("203", null);
+
+    const buckets = selectNonEmptyAgendaBuckets(
+      [olderThanOneYear, exactlyOneYearOld, undated],
+      NOW,
+    );
+
+    expect(buckets.flatMap(({ items }) => items.map(({ id }) => id))).toEqual([
+      exactlyOneYearOld.id,
+      undated.id,
+    ]);
+  });
+
+  it("excludes old dated assignments from Hidden Items", () => {
+    const oldAssignment = agendaItem("201", "2025-08-24T11:59:59.999Z");
+    const recentAssignment = agendaItem("202", "2026-08-23T12:00:00.000Z");
+    const itemStates: ItemState[] = [oldAssignment, recentAssignment].map(
+      ({ id }) => ({ hidden: true, id, note: "" }),
+    );
+
+    expect(
+      selectHiddenItems(
+        [oldAssignment, recentAssignment],
+        PREFERENCES,
+        itemStates,
+        undefined,
+        undefined,
+        NOW,
+      ).map(({ id }) => id),
+    ).toEqual([recentAssignment.id]);
   });
 });

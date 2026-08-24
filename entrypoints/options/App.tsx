@@ -24,6 +24,12 @@ import { useEffect, useState } from "react";
 
 import type { AgendaItemRecord, ItemState } from "../../src/domain/models";
 import {
+  getCollidingItemStateIds,
+  getItemState,
+  getItemStateKey,
+} from "../../src/dashboard/item-state-keys";
+import type { ItemStateRecordType } from "../../src/dashboard/item-state-keys";
+import {
   selectAnnouncementsByCourse,
   selectHiddenAnnouncements,
   selectHiddenItems,
@@ -59,10 +65,17 @@ interface AgendaFilters {
 }
 
 /** Resolves persisted local state with a safe default for new agenda items. */
-function itemStateFor(itemId: string, itemStates: ItemState[]): ItemState {
+function itemStateFor(
+  itemId: string,
+  recordType: ItemStateRecordType,
+  statesById: ReadonlyMap<string, ItemState>,
+  collidingItemIds: ReadonlySet<string>,
+): ItemState {
+  const itemStateKey = getItemStateKey(recordType, itemId, collidingItemIds);
+
   return (
-    itemStates.find(({ id }) => id === itemId) ?? {
-      id: itemId,
+    getItemState(statesById, recordType, itemId, collidingItemIds) ?? {
+      id: itemStateKey,
       hidden: false,
       note: "",
     }
@@ -179,19 +192,30 @@ export function App({
     course_ids: selectedCourseIds,
     title_query: titleQuery,
   };
+  const collidingItemIds = getCollidingItemStateIds(agendaItems, announcements);
+  const itemStatesById = new Map(itemStates.map((state) => [state.id, state]));
   const visibleItems = selectVisibleAgendaItems(
     agendaItems,
     preferences,
     itemStates,
     filters,
+    collidingItemIds,
   );
-  const hiddenItems = selectHiddenItems(agendaItems, preferences, itemStates);
+  const hiddenItems = selectHiddenItems(
+    agendaItems,
+    preferences,
+    itemStates,
+    undefined,
+    collidingItemIds,
+    dashboardNow,
+  );
   const hiddenAnnouncements = selectHiddenAnnouncements(
     courses,
     preferences,
     announcements,
     itemStates,
     dashboardNow,
+    collidingItemIds,
   );
   const agendaBuckets = selectNonEmptyAgendaBuckets(visibleItems, dashboardNow);
   const announcementGroups = selectAnnouncementsByCourse(
@@ -200,6 +224,7 @@ export function App({
     announcements,
     itemStates,
     dashboardNow,
+    collidingItemIds,
   );
   const courseNameById = new Map(
     courses.map((course) => [course.course_id, course.name]),
@@ -236,21 +261,36 @@ export function App({
     item: AgendaItemRecord,
     hidden: boolean,
   ): Promise<void> {
-    const state = itemStateFor(item.id, itemStates);
-    await saveItemState(database, item.id, { hidden, note: state.note });
+    const state = itemStateFor(
+      item.id,
+      "agenda",
+      itemStatesById,
+      collidingItemIds,
+    );
+    await saveItemState(database, state.id, { hidden, note: state.note });
   }
 
   async function setAnnouncementHidden(
     announcementId: string,
     hidden: boolean,
   ): Promise<void> {
-    const state = itemStateFor(announcementId, itemStates);
-    await saveItemState(database, announcementId, { hidden, note: state.note });
+    const state = itemStateFor(
+      announcementId,
+      "announcement",
+      itemStatesById,
+      collidingItemIds,
+    );
+    await saveItemState(database, state.id, { hidden, note: state.note });
   }
 
   async function saveNote(item: AgendaItemRecord): Promise<void> {
-    const state = itemStateFor(item.id, itemStates);
-    await saveItemState(database, item.id, {
+    const state = itemStateFor(
+      item.id,
+      "agenda",
+      itemStatesById,
+      collidingItemIds,
+    );
+    await saveItemState(database, state.id, {
       hidden: state.hidden,
       note: noteDrafts[item.id] ?? state.note,
     });
@@ -294,22 +334,26 @@ export function App({
   return (
     <Container component="main" size="xl" py="md">
       <Stack gap="md">
-        <Group justify="space-between">
-          <Group gap="sm" wrap="nowrap">
+        <Group className="dashboard-header" justify="space-between">
+          <Group className="dashboard-brand" gap="sm" wrap="nowrap">
             <Image
               alt="Better Canvas View icon"
+              className="dashboard-brand-icon"
               height={48}
               src="/icon-48.png"
               width={48}
             />
-            <div>
-              <Title order={1}>Better Canvas View</Title>
+            <div className="dashboard-brand-copy">
+              <Title className="dashboard-title" order={1}>
+                Better Canvas View
+              </Title>
               <Text c="dimmed" size="sm">
                 Your local Canvas agenda
               </Text>
             </div>
           </Group>
           <Button
+            className="dashboard-refresh"
             type="button"
             loading={isRefreshing}
             onClick={() => void refresh()}
@@ -382,7 +426,12 @@ export function App({
                   </Title>
                   <Stack gap="xs">
                     {bucket.items.map((item) => {
-                      const state = itemStateFor(item.id, itemStates);
+                      const state = itemStateFor(
+                        item.id,
+                        "agenda",
+                        itemStatesById,
+                        collidingItemIds,
+                      );
                       return (
                         <AgendaRow
                           key={item.id}

@@ -7,6 +7,7 @@ import { getNextPageUrl } from "./pagination";
 const CANVAS_ORIGIN = "https://sjsu.instructure.com";
 const CANVAS_API_PREFIX = "/api/v1/";
 const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRY_DELAY_MS = 30_000;
 const BASE_RETRY_DELAY_MS = 1_000;
 
@@ -27,6 +28,7 @@ interface CanvasHttpClientOptions {
   fetch_fn?: typeof fetch;
   sleep_fn?: (delayMs: number) => Promise<void>;
   max_attempts?: number;
+  request_timeout_ms?: number;
 }
 
 /** Represents a privacy-safe Canvas transport failure. */
@@ -154,6 +156,7 @@ export class CanvasHttpClient implements CanvasClient {
   readonly #fetchFn: typeof fetch;
   readonly #sleepFn: (delayMs: number) => Promise<void>;
   readonly #maxAttempts: number;
+  readonly #requestTimeoutMs: number;
 
   /**
    * Creates a Canvas client with optional deterministic test dependencies.
@@ -165,6 +168,11 @@ export class CanvasHttpClient implements CanvasClient {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new RangeError("max_attempts must be a positive integer.");
     }
+    const requestTimeoutMs =
+      options.request_timeout_ms ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1) {
+      throw new RangeError("request_timeout_ms must be a positive integer.");
+    }
 
     this.#fetchFn =
       options.fetch_fn ??
@@ -172,6 +180,7 @@ export class CanvasHttpClient implements CanvasClient {
         globalThis.fetch(input, init));
     this.#sleepFn = options.sleep_fn ?? defaultSleep;
     this.#maxAttempts = maxAttempts;
+    this.#requestTimeoutMs = requestTimeoutMs;
   }
 
   /** Fetches and parses one fixed-origin Canvas JSON resource. */
@@ -223,11 +232,7 @@ export class CanvasHttpClient implements CanvasClient {
       let response: Response;
 
       try {
-        response = await this.#fetchFn(url.href, {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-          method: "GET",
-        });
+        response = await this.#fetchWithTimeout(url);
       } catch {
         throw new CanvasClientError("network_error");
       }
@@ -260,5 +265,30 @@ export class CanvasHttpClient implements CanvasClient {
     }
 
     throw new CanvasClientError("network_error");
+  }
+
+  /** Bounds a fetch duration while preserving the fixed request-init contract. */
+  async #fetchWithTimeout(url: URL): Promise<Response> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new CanvasClientError("network_error"));
+      }, this.#requestTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([
+        this.#fetchFn(url.href, {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+          method: "GET",
+        }),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 }
