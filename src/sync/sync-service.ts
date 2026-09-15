@@ -11,11 +11,13 @@ import {
   normalizeAnnouncement,
   normalizeAssignment,
   normalizeCourse,
+  normalizeIsaAssignment,
 } from "../domain/normalization";
 import type {
   AgendaItemRecord,
   AnnouncementRecord,
   CourseRecord,
+  IsaAssignmentRecord,
   SyncMetadata,
 } from "../domain/models";
 import { CanvasDatabase } from "../storage/database";
@@ -28,6 +30,7 @@ export interface SyncCounts {
   courses: number;
   agenda_items: number;
   announcements: number;
+  isa_assignments?: number;
 }
 
 export interface SyncResult {
@@ -55,13 +58,19 @@ type CanvasObject = Record<string, unknown>;
 
 const COURSE_QUERY: CanvasQuery = {
   enrollment_state: "active",
-  enrollment_type: "student",
-  "include[]": "term",
+  "include[]": ["term", "enrollments"],
   per_page: 100,
 };
 
 const ASSIGNMENT_QUERY: CanvasQuery = {
   "include[]": "submission",
+  order_by: "due_at",
+  override_assignment_dates: true,
+  per_page: 100,
+};
+
+const ISA_ASSIGNMENT_QUERY: CanvasQuery = {
+  "include[]": "needs_grading_count",
   order_by: "due_at",
   override_assignment_dates: true,
   per_page: 100,
@@ -120,9 +129,10 @@ export class SyncService implements SyncRunner {
       const snapshot = await this.#fetchSnapshot();
       const completedAt = this.#nowFn().toISOString();
       const counts: SyncCounts = {
-        courses: snapshot.courses.length,
         agenda_items: snapshot.agenda_items.length,
         announcements: snapshot.announcements.length,
+        courses: snapshot.courses.length,
+        isa_assignments: snapshot.isa_assignments.length,
       };
       const metadata: SyncMetadata = {
         id: "current",
@@ -143,20 +153,19 @@ export class SyncService implements SyncRunner {
       const previous = await this.#database.sync_metadata.get("current");
 
       await saveSyncMetadata(this.#database, {
-        ...previous,
         id: "current",
         last_attempt_at: completedAt,
-        last_success_at: previous?.last_success_at ?? null,
         last_status: errorCode,
         error_code: errorCode,
+        last_success_at: previous?.last_success_at ?? null,
       });
 
       return {
-        status: errorCode,
-        trigger,
-        startedAt,
         completedAt,
         error_code: errorCode,
+        startedAt,
+        status: errorCode,
+        trigger,
       };
     }
   }
@@ -166,6 +175,7 @@ export class SyncService implements SyncRunner {
     courses: CourseRecord[];
     agenda_items: AgendaItemRecord[];
     announcements: AnnouncementRecord[];
+    isa_assignments: IsaAssignmentRecord[];
   }> {
     const rawCourses = await this.#client.getAll(
       "/api/v1/courses",
@@ -174,38 +184,54 @@ export class SyncService implements SyncRunner {
     const courses: CourseRecord[] = [];
     const agendaItems: AgendaItemRecord[] = [];
     const announcements: AnnouncementRecord[] = [];
+    const isaAssignments: IsaAssignmentRecord[] = [];
 
     for (const rawCourse of rawCourses) {
       const course = normalizeCourse(rawCourse);
       courses.push(course);
 
       const courseId = encodeURIComponent(course.course_id);
-      const assignments = await this.#client.getAll(
-        `/api/v1/courses/${courseId}/assignments`,
-        ASSIGNMENT_QUERY,
-      );
-      for (const assignment of assignments) {
-        const normalized = normalizeAssignment(rawCourse, assignment);
-        if (normalized !== null) {
-          agendaItems.push(normalized);
-        }
-      }
 
-      const topics = await this.#client.getAll(
-        `/api/v1/courses/${courseId}/discussion_topics`,
-        ANNOUNCEMENT_QUERY,
-      );
-      for (const topic of topics) {
-        if (isCanvasObject(topic) && topic.is_announcement === true) {
-          announcements.push(normalizeAnnouncement(rawCourse, topic));
+      if (course.enrollment_type === "ta") {
+        const assignments = await this.#client.getAll(
+          `/api/v1/courses/${courseId}/assignments`,
+          ISA_ASSIGNMENT_QUERY,
+        );
+        for (const assignment of assignments) {
+          const normalized = normalizeIsaAssignment(rawCourse, assignment);
+          if (normalized !== null) {
+            isaAssignments.push(normalized);
+          }
+        }
+      } else {
+        const assignments = await this.#client.getAll(
+          `/api/v1/courses/${courseId}/assignments`,
+          ASSIGNMENT_QUERY,
+        );
+        for (const assignment of assignments) {
+          const normalized = normalizeAssignment(rawCourse, assignment);
+          if (normalized !== null) {
+            agendaItems.push(normalized);
+          }
+        }
+
+        const topics = await this.#client.getAll(
+          `/api/v1/courses/${courseId}/discussion_topics`,
+          ANNOUNCEMENT_QUERY,
+        );
+        for (const topic of topics) {
+          if (isCanvasObject(topic) && topic.is_announcement === true) {
+            announcements.push(normalizeAnnouncement(rawCourse, topic));
+          }
         }
       }
     }
 
     return {
-      courses,
       agenda_items: agendaItems,
       announcements,
+      courses,
+      isa_assignments: isaAssignments,
     };
   }
 }

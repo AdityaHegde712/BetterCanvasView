@@ -12,6 +12,8 @@ import type {
   AnnouncementRecord,
   CoursePreference,
   CourseRecord,
+  IsaAssignmentRecord,
+  IsaTodoRecord,
   ItemState,
   SyncMetadata,
 } from "../domain/models";
@@ -38,8 +40,14 @@ export class CanvasDatabase extends Dexie {
   /** Stores the outcome of the latest synchronization attempt. */
   sync_metadata!: Table<SyncMetadata, "current">;
 
+  /** Stores normalized ISA assignments with grading status. */
+  isa_assignments!: Table<IsaAssignmentRecord, string>;
+
+  /** Stores persistent local ISA todo checklist items. */
+  isa_todos!: Table<IsaTodoRecord, string>;
+
   /**
-   * Creates a database using the version-1 Canvas schema.
+   * Creates a database using versioned Canvas schemas.
    *
    * @param databaseName - The IndexedDB database name.
    */
@@ -53,6 +61,17 @@ export class CanvasDatabase extends Dexie {
       course_preferences: "&id, enabled",
       item_states: "&id, hidden",
       sync_metadata: "&id, last_status, last_success_at",
+    });
+
+    this.version(2).stores({
+      courses: "&id, course_id, name, course_code, enrollment_type",
+      agenda_items: "&id, course_id, due_at, item_type, is_complete",
+      announcements: "&id, course_id, posted_at",
+      course_preferences: "&id, enabled",
+      item_states: "&id, hidden",
+      sync_metadata: "&id, last_status, last_success_at",
+      isa_assignments: "&id, course_id, due_at, needs_grading_count",
+      isa_todos: "&id, completed, created_at",
     });
   }
 }
