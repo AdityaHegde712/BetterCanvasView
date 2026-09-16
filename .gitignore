@@ -1,6 +1,6 @@
 # Local planning artifacts
 !.agent-tasks/
-.agent-tasks/**
+.agent-tasks/*.md
 !.agent-tasks/**/
 !.agent-tasks/**/*.md
 
