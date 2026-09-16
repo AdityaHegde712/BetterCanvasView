@@ -2,7 +2,7 @@
 !.agent-tasks/
 .agent-tasks/*.md
 !.agent-tasks/**/
-!.agent-tasks/**/*.md
+!.agent-tasks/v*/*.md
 
 # Local secrets
 .env
@@ -20,3 +20,5 @@ dist/
 playwright-report/
 test-results/
 coverage/
+tests/sample_download/
+

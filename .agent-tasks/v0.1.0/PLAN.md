@@ -15,6 +15,7 @@ Last updated: 2026-08-24
 ## Owner Manual Smoke Verification & Exit Procedures
 
 On 2026-08-24, the owner reloaded the corrected unpacked extension in Brave and verified:
+
 1. Header and agenda behavior responsive layout preserved (48x48 icon, one-line title, zero horizontal overflow).
 2. Live assignments/announcements fetch (success in 245 ms; 1 course).
 3. Dated agenda and hidden-assignment views apply the same inclusive 365-day presentation window.

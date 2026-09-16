@@ -15,6 +15,7 @@ import {
   Image,
   Modal,
   Paper,
+  Progress,
   Stack,
   Tabs,
   Text,
@@ -45,7 +46,7 @@ import {
   formatPacificDueAt,
 } from "../../src/dashboard/formatters";
 import type { SyncResult } from "../../src/sync/sync-service";
-import { CanvasDatabase } from "../../src/storage/database";
+import type { CanvasDatabase } from "../../src/storage/database";
 import {
   addIsaTodo,
   clearAllData,
@@ -56,6 +57,15 @@ import {
   toggleIsaTodo,
 } from "../../src/storage/repository";
 import { getTrustedCanvasUrl } from "../../src/security/canvas-links";
+import { createExportTarget } from "../../src/export/models";
+import type { ExportIssue, ExportProgressState } from "../../src/export/models";
+import { CanvasDeliverableDownloader } from "../../src/export/canvas-downloader";
+import type { SingleDeliverableResult } from "../../src/export/canvas-downloader";
+import {
+  createAssignmentsZip,
+  triggerBlobDownload,
+} from "../../src/export/zip-packager";
+import { CanvasHttpClient } from "../../src/canvas/client";
 
 const CANVAS_HOME = "https://sjsu.instructure.com/";
 const REFRESH_SUCCESS_VISIBLE_MS = 4_000;
@@ -64,6 +74,9 @@ interface AppProps {
   database: CanvasDatabase;
   now_fn: () => Date;
   send_message: (message: { type: "RUN_CANVAS_SYNC" }) => Promise<SyncResult>;
+  downloader?: CanvasDeliverableDownloader;
+  zip_packager_fn?: typeof createAssignmentsZip;
+  download_trigger_fn?: typeof triggerBlobDownload;
 }
 
 interface AgendaFilters {
@@ -97,6 +110,9 @@ function AgendaRow({
   note,
   onHideChange,
   onNoteChange,
+  isExportMode,
+  isExportSelected,
+  onExportSelectChange,
 }: {
   item: AgendaItemRecord;
   courseName: string;
@@ -104,6 +120,9 @@ function AgendaRow({
   note: string;
   onHideChange: (hidden: boolean) => void;
   onNoteChange: (value: string) => void;
+  isExportMode?: boolean;
+  isExportSelected?: boolean;
+  onExportSelectChange?: (selected: boolean) => void;
 }): React.JSX.Element {
   const link = getTrustedCanvasUrl(item.html_url);
   const points =
@@ -112,42 +131,67 @@ function AgendaRow({
       : `${item.points_possible} points`;
 
   return (
-    <Paper className="dashboard-row" p="sm" withBorder>
-      <Stack gap="xs">
-        <Group align="flex-start" justify="space-between" wrap="nowrap">
-          <div>
-            <Text c="dimmed" size="xs">
-              {courseName}
-            </Text>
-            {link === null ? (
-              <Text fw={600}>{item.title}</Text>
-            ) : (
-              <Anchor href={link} rel="noreferrer" target="_blank" fw={600}>
-                {item.title}
-              </Anchor>
-            )}
-          </div>
+    <Paper
+      className="dashboard-row"
+      p="sm"
+      withBorder
+      style={
+        isExportSelected
+          ? {
+              borderColor: "var(--mantine-color-blue-filled)",
+              backgroundColor: "rgba(76, 110, 245, 0.05)",
+            }
+          : undefined
+      }
+    >
+      <Group align="flex-start" wrap="nowrap">
+        {isExportMode && (
           <Checkbox
-            aria-label={`Hide ${item.title}`}
-            checked={itemState.hidden}
-            label="Hide"
-            onChange={(event) => onHideChange(event.currentTarget.checked)}
+            aria-label={`Select ${item.title} for download`}
+            checked={isExportSelected}
+            onChange={(event) =>
+              onExportSelectChange?.(event.currentTarget.checked)
+            }
+            size="md"
+            mt={4}
           />
-        </Group>
-        <Text size="sm">{formatPacificDueAt(item.due_at)}</Text>
-        <Text c="dimmed" size="sm">
-          {points} · {item.item_type}
-        </Text>
-        <Group align="end" wrap="nowrap">
-          <TextInput
-            aria-label={`Note for ${item.title}`}
-            className="note-input"
-            label="Note"
-            value={note}
-            onChange={(event) => onNoteChange(event.currentTarget.value)}
-          />
-        </Group>
-      </Stack>
+        )}
+        <Stack gap="xs" style={{ flex: 1 }}>
+          <Group align="flex-start" justify="space-between" wrap="nowrap">
+            <div>
+              <Text c="dimmed" size="xs">
+                {courseName}
+              </Text>
+              {link === null ? (
+                <Text fw={600}>{item.title}</Text>
+              ) : (
+                <Anchor href={link} rel="noreferrer" target="_blank" fw={600}>
+                  {item.title}
+                </Anchor>
+              )}
+            </div>
+            <Checkbox
+              aria-label={`Hide ${item.title}`}
+              checked={itemState.hidden}
+              label="Hide"
+              onChange={(event) => onHideChange(event.currentTarget.checked)}
+            />
+          </Group>
+          <Text size="sm">{formatPacificDueAt(item.due_at)}</Text>
+          <Text c="dimmed" size="sm">
+            {points} · {item.item_type}
+          </Text>
+          <Group align="end" wrap="nowrap">
+            <TextInput
+              aria-label={`Note for ${item.title}`}
+              className="note-input"
+              label="Note"
+              value={note}
+              onChange={(event) => onNoteChange(event.currentTarget.value)}
+            />
+          </Group>
+        </Stack>
+      </Group>
     </Paper>
   );
 }
@@ -157,6 +201,9 @@ export function App({
   database,
   now_fn,
   send_message,
+  downloader,
+  zip_packager_fn = createAssignmentsZip,
+  download_trigger_fn = triggerBlobDownload,
 }: AppProps): React.JSX.Element {
   const courses = useLiveQuery(
     () => database.courses.toArray(),
@@ -211,6 +258,15 @@ export function App({
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState<boolean>(false);
+  const [isExportMode, setIsExportMode] = useState<boolean>(false);
+  const [selectedExportItemIds, setSelectedExportItemIds] = useState<string[]>(
+    [],
+  );
+  const [exportProgress, setExportProgress] =
+    useState<ExportProgressState | null>(null);
+  const [exportAbortController, setExportAbortController] =
+    useState<AbortController | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const dashboardNow = now_fn();
 
   const studentCourses = useMemo(
@@ -402,6 +458,96 @@ export function App({
     setClearDialogOpen(false);
   }
 
+  async function handleDownloadDeliverables(): Promise<void> {
+    const selectedItems = agendaItems.filter((i) =>
+      selectedExportItemIds.includes(i.id),
+    );
+    if (selectedItems.length === 0) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    setExportAbortController(abortController);
+    setExportError(null);
+
+    try {
+      const activeDownloader =
+        downloader ??
+        new CanvasDeliverableDownloader({
+          client: new CanvasHttpClient(),
+        });
+
+      const targets = selectedItems.map((item) =>
+        createExportTarget(
+          item,
+          courseNameById.get(item.course_id) ?? "Unknown Course",
+        ),
+      );
+
+      const deliverableResults: SingleDeliverableResult[] = [];
+      const allIssues: ExportIssue[] = [];
+
+      let completedCount = 0;
+      for (const target of targets) {
+        if (abortController.signal.aborted) {
+          break;
+        }
+
+        setExportProgress({
+          active: true,
+          stage: "fetching_details",
+          current: completedCount,
+          total: targets.length,
+          message: `Processing (${completedCount + 1}/${targets.length}): ${target.title}...`,
+        });
+
+        const result = await activeDownloader.downloadDeliverable(target, {
+          signal: abortController.signal,
+          onProgress: (state) => {
+            setExportProgress({
+              ...state,
+              current: completedCount,
+              total: targets.length,
+            });
+          },
+        });
+
+        deliverableResults.push(result);
+        allIssues.push(...result.issues);
+        completedCount++;
+      }
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      setExportProgress({
+        active: true,
+        stage: "compressing",
+        current: targets.length,
+        total: targets.length,
+        message: "Compressing deliverables into ZIP archive...",
+      });
+
+      const zipBlob = await zip_packager_fn(deliverableResults, allIssues);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      download_trigger_fn(zipBlob, `canvas_assignments_${dateStr}.zip`);
+
+      setExportProgress(null);
+      setIsExportMode(false);
+      setSelectedExportItemIds([]);
+    } catch (err) {
+      if (!abortController.signal.aborted) {
+        setExportError(
+          err instanceof Error ? err.message : "Failed to export deliverables",
+        );
+      }
+      setExportProgress(null);
+    } finally {
+      setExportAbortController(null);
+    }
+  }
+
   return (
     <Container component="main" size="xl" py="md">
       <Stack gap="md">
@@ -502,6 +648,120 @@ export function App({
                   </Group>
                 </Stack>
               </Paper>
+              {!isExportMode ? (
+                <Group justify="flex-start">
+                  <Button
+                    variant="light"
+                    color="blue"
+                    size="xs"
+                    onClick={() => setIsExportMode(true)}
+                  >
+                    Download Assignment Deliverables
+                  </Button>
+                </Group>
+              ) : (
+                <Paper
+                  p="sm"
+                  withBorder
+                  style={{
+                    backgroundColor: "rgba(76, 110, 245, 0.05)",
+                    borderColor: "rgba(76, 110, 245, 0.3)",
+                  }}
+                >
+                  <Group justify="space-between" wrap="wrap">
+                    <Group gap="sm">
+                      <Badge size="lg" color="blue" variant="filled">
+                        {selectedExportItemIds.length} Selected
+                      </Badge>
+                      <Button
+                        variant="subtle"
+                        size="xs"
+                        onClick={() => {
+                          const allVisibleIds = agendaBuckets.flatMap((b) =>
+                            b.items.map((i) => i.id),
+                          );
+                          setSelectedExportItemIds(allVisibleIds);
+                        }}
+                      >
+                        Select All (
+                        {agendaBuckets.flatMap((b) => b.items).length})
+                      </Button>
+                      <Button
+                        variant="subtle"
+                        size="xs"
+                        color="gray"
+                        onClick={() => setSelectedExportItemIds([])}
+                      >
+                        Deselect All
+                      </Button>
+                    </Group>
+                    <Group gap="sm">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        disabled={exportProgress !== null}
+                        onClick={() => {
+                          setIsExportMode(false);
+                          setSelectedExportItemIds([]);
+                          setExportError(null);
+                        }}
+                      >
+                        Exit Selection Mode
+                      </Button>
+                      <Button
+                        variant="filled"
+                        color="blue"
+                        size="sm"
+                        loading={exportProgress !== null}
+                        disabled={selectedExportItemIds.length === 0}
+                        onClick={() => void handleDownloadDeliverables()}
+                      >
+                        Download Materials (.zip)
+                      </Button>
+                    </Group>
+                  </Group>
+                  {exportProgress !== null && (
+                    <Stack gap="xs" mt="sm">
+                      <Group justify="space-between">
+                        <Text size="xs" c="dimmed">
+                          {exportProgress.message}
+                        </Text>
+                        <Button
+                          variant="subtle"
+                          color="red"
+                          size="compact-xs"
+                          onClick={() => {
+                            exportAbortController?.abort();
+                            setExportProgress(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </Group>
+                      <Progress
+                        value={
+                          exportProgress.total > 0
+                            ? (exportProgress.current / exportProgress.total) *
+                              100
+                            : 0
+                        }
+                        size="sm"
+                        animated
+                      />
+                    </Stack>
+                  )}
+                  {exportError && (
+                    <Alert
+                      color="red"
+                      mt="xs"
+                      onClose={() => setExportError(null)}
+                      withCloseButton
+                    >
+                      {exportError}
+                    </Alert>
+                  )}
+                </Paper>
+              )}
               {agendaBuckets.map((bucket) => (
                 <section key={bucket.id} aria-label={bucket.label}>
                   <Title order={2} size="h4" mb="xs">
@@ -525,6 +785,17 @@ export function App({
                           item={item}
                           itemState={state}
                           note={noteDrafts[item.id] ?? state.note}
+                          isExportMode={isExportMode}
+                          isExportSelected={selectedExportItemIds.includes(
+                            item.id,
+                          )}
+                          onExportSelectChange={(checked) =>
+                            setSelectedExportItemIds((ids) =>
+                              checked
+                                ? [...ids, item.id]
+                                : ids.filter((id) => id !== item.id),
+                            )
+                          }
                           onHideChange={(hidden) =>
                             void setItemHidden(item, hidden)
                           }

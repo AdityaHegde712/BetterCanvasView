@@ -1,6 +1,6 @@
 {
   "name": "better-canvas-view",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -27,6 +27,7 @@
     "@mantine/hooks": "^9.5.2",
     "dexie": "^4.4.5",
     "dexie-react-hooks": "^4.4.0",
+    "jszip": "^3.10.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -36,6 +37,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.6",
+    "@types/jszip": "^3.4.0",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
