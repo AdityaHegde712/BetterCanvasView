@@ -3,6 +3,7 @@
  */
 
 export type AgendaItemType = "assignment" | "quiz" | "external_tool";
+export type CourseEnrollmentType = "student" | "ta";
 
 export interface CourseRecord {
   id: string;
@@ -11,6 +12,26 @@ export interface CourseRecord {
   name: string;
   course_code: string;
   html_url: string | null;
+  enrollment_type?: CourseEnrollmentType;
+}
+
+export interface IsaAssignmentRecord {
+  id: string;
+  course_id: string;
+  object_id: string;
+  title: string;
+  due_at: string | null;
+  points_possible: number | null;
+  needs_grading_count: number;
+  html_url: string | null;
+  speedgrader_url: string | null;
+}
+
+export interface IsaTodoRecord {
+  id: string;
+  text: string;
+  completed: boolean;
+  created_at: string;
 }
 
 export interface AgendaItemRecord {
@@ -50,6 +71,7 @@ export interface RemoteSnapshot {
   courses: CourseRecord[];
   agenda_items: AgendaItemRecord[];
   announcements: AnnouncementRecord[];
+  isa_assignments?: IsaAssignmentRecord[];
 }
 
 export interface SyncMetadata {

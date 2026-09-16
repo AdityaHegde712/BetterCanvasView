@@ -3,8 +3,10 @@
  */
 
 import {
+  ActionIcon,
   Alert,
   Anchor,
+  Badge,
   Button,
   Checkbox,
   Container,
@@ -20,7 +22,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AgendaItemRecord, ItemState } from "../../src/domain/models";
 import {
@@ -33,6 +35,7 @@ import {
   selectAnnouncementsByCourse,
   selectHiddenAnnouncements,
   selectHiddenItems,
+  selectIsaGradingBuckets,
   selectNonEmptyAgendaBuckets,
   selectVisibleAgendaItems,
   shouldShowStaleWarning,
@@ -44,9 +47,13 @@ import {
 import type { SyncResult } from "../../src/sync/sync-service";
 import { CanvasDatabase } from "../../src/storage/database";
 import {
+  addIsaTodo,
   clearAllData,
+  clearCompletedIsaTodos,
+  deleteIsaTodo,
   saveCoursePreference,
   saveItemState,
+  toggleIsaTodo,
 } from "../../src/storage/repository";
 import { getTrustedCanvasUrl } from "../../src/security/canvas-links";
 
@@ -181,13 +188,40 @@ export function App({
     [database],
     null,
   );
+  const isaAssignments = useLiveQuery(
+    () => database.isa_assignments.toArray(),
+    [database],
+    [],
+  );
+  const isaTodos = useLiveQuery(
+    () => database.isa_todos.orderBy("created_at").reverse().toArray(),
+    [database],
+    [],
+  );
   const [titleQuery, setTitleQuery] = useState<string>("");
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
+  const [isaTitleQuery, setIsaTitleQuery] = useState<string>("");
+  const [selectedIsaCourseIds, setSelectedIsaCourseIds] = useState<string[]>(
+    [],
+  );
+  const [newTodoText, setNewTodoText] = useState<string>("");
+  const [completedGradingOpen, setCompletedGradingOpen] =
+    useState<boolean>(true);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState<boolean>(false);
   const dashboardNow = now_fn();
+
+  const studentCourses = useMemo(
+    () => courses.filter((course) => course.enrollment_type !== "ta"),
+    [courses],
+  );
+  const taCourses = useMemo(
+    () => courses.filter((course) => course.enrollment_type === "ta"),
+    [courses],
+  );
+
   const filters: AgendaFilters = {
     course_ids: selectedCourseIds,
     title_query: titleQuery,
@@ -231,6 +265,20 @@ export function App({
   );
   const dataIsStale = shouldShowStaleWarning(metadata, dashboardNow);
 
+  const isaBuckets = selectIsaGradingBuckets(isaAssignments, {
+    course_ids: selectedIsaCourseIds,
+    title_query: isaTitleQuery,
+  });
+
+  const openTodosCount = useMemo(
+    () => isaTodos.filter((todo) => !todo.completed).length,
+    [isaTodos],
+  );
+  const completedTodosCount = useMemo(
+    () => isaTodos.filter((todo) => todo.completed).length,
+    [isaTodos],
+  );
+
   useEffect(() => {
     if (refreshStatus !== "Refresh complete") {
       return undefined;
@@ -246,7 +294,7 @@ export function App({
   function toggleCourseFilter(courseId: string, checked: boolean): void {
     setSelectedCourseIds((currentIds) => {
       if (currentIds.length === 0) {
-        return courses
+        return studentCourses
           .map((course) => course.course_id)
           .filter((id) => id !== courseId);
       }
@@ -255,6 +303,29 @@ export function App({
         ? [...currentIds, courseId]
         : currentIds.filter((id) => id !== courseId);
     });
+  }
+
+  function toggleIsaCourseFilter(courseId: string, checked: boolean): void {
+    setSelectedIsaCourseIds((currentIds) => {
+      if (currentIds.length === 0) {
+        return taCourses
+          .map((course) => course.course_id)
+          .filter((id) => id !== courseId);
+      }
+
+      return checked
+        ? [...currentIds, courseId]
+        : currentIds.filter((id) => id !== courseId);
+    });
+  }
+
+  async function handleAddTodo(): Promise<void> {
+    const text = newTodoText.trim();
+    if (text === "") {
+      return;
+    }
+    await addIsaTodo(database, text);
+    setNewTodoText("");
   }
 
   async function setItemHidden(
@@ -382,6 +453,18 @@ export function App({
         <Tabs defaultValue="agenda">
           <Tabs.List>
             <Tabs.Tab value="agenda">Agenda</Tabs.Tab>
+            <Tabs.Tab
+              value="isa-tasks"
+              rightSection={
+                isaBuckets.totalToGradeCount > 0 ? (
+                  <Badge color="orange" size="xs" variant="filled">
+                    {isaBuckets.totalToGradeCount}
+                  </Badge>
+                ) : undefined
+              }
+            >
+              ISA Tasks
+            </Tabs.Tab>
             <Tabs.Tab value="announcements">Announcements</Tabs.Tab>
             <Tabs.Tab value="hidden-items">Hidden Items</Tabs.Tab>
             <Tabs.Tab value="settings">Settings</Tabs.Tab>
@@ -400,7 +483,7 @@ export function App({
                     }
                   />
                   <Group gap="md">
-                    {courses.map((course) => (
+                    {studentCourses.map((course) => (
                       <Checkbox
                         key={course.id}
                         checked={
@@ -465,6 +548,337 @@ export function App({
                 Save
               </Button>
             </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="isa-tasks" pt="md">
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 340px",
+                gap: "24px",
+                alignItems: "start",
+              }}
+            >
+              {/* Left Column: Grading Assignments */}
+              <Stack gap="md">
+                {/* Search & Course Filters */}
+                <Paper p="sm" withBorder>
+                  <Stack gap="xs">
+                    <TextInput
+                      aria-label="Search ISA grading assignments"
+                      placeholder="Search ISA grading assignments..."
+                      type="search"
+                      value={isaTitleQuery}
+                      onChange={(event) =>
+                        setIsaTitleQuery(event.currentTarget.value)
+                      }
+                    />
+                    {taCourses.length > 0 && (
+                      <Group gap="md">
+                        {taCourses.map((course) => (
+                          <Checkbox
+                            key={course.id}
+                            checked={
+                              selectedIsaCourseIds.length === 0 ||
+                              selectedIsaCourseIds.includes(course.course_id)
+                            }
+                            label={course.name}
+                            onChange={(event) =>
+                              toggleIsaCourseFilter(
+                                course.course_id,
+                                event.currentTarget.checked,
+                              )
+                            }
+                          />
+                        ))}
+                      </Group>
+                    )}
+                  </Stack>
+                </Paper>
+
+                {/* To Be Graded Section */}
+                <div>
+                  <Group justify="space-between" mb="xs">
+                    <Title order={2} size="h4">
+                      To Be Graded
+                    </Title>
+                    <Badge color="orange" variant="light" size="sm">
+                      {isaBuckets.toBeGraded.length} assignments •{" "}
+                      {isaBuckets.totalSubmissionsPending} pending
+                    </Badge>
+                  </Group>
+
+                  {isaBuckets.toBeGraded.length === 0 ? (
+                    <Paper p="md" withBorder>
+                      <Text c="dimmed">No pending submissions to grade.</Text>
+                    </Paper>
+                  ) : (
+                    <Stack gap="xs">
+                      {isaBuckets.toBeGraded.map((item) => (
+                        <Paper
+                          key={item.id}
+                          p="md"
+                          withBorder
+                          className="dashboard-row"
+                        >
+                          <Group
+                            justify="space-between"
+                            align="center"
+                            wrap="nowrap"
+                          >
+                            <Stack gap={4} style={{ minWidth: 0 }}>
+                              <Group gap="xs">
+                                <Badge size="xs" color="blue" variant="light">
+                                  {courseNameById.get(item.course_id) ??
+                                    "Unknown course"}
+                                </Badge>
+                                <Text size="xs" c="dimmed">
+                                  {item.due_at
+                                    ? `Due: ${formatPacificDueAt(item.due_at)}`
+                                    : "Undated"}
+                                </Text>
+                              </Group>
+                              <Text fw={600} size="md">
+                                {item.title}
+                              </Text>
+                              <Group gap="xs">
+                                <Badge size="xs" color="orange" variant="light">
+                                  {item.needs_grading_count} to grade
+                                </Badge>
+                                <Text size="xs" c="dimmed">
+                                  •
+                                </Text>
+                                <Text size="xs" c="dimmed">
+                                  {item.points_possible !== null
+                                    ? `${item.points_possible} points possible`
+                                    : "Ungraded"}
+                                </Text>
+                              </Group>
+                            </Stack>
+                            <Group gap="xs" wrap="nowrap">
+                              {item.html_url !== null && (
+                                <Button
+                                  component="a"
+                                  href={item.html_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  size="xs"
+                                  variant="default"
+                                >
+                                  Details
+                                </Button>
+                              )}
+                              {item.speedgrader_url !== null && (
+                                <Button
+                                  component="a"
+                                  href={item.speedgrader_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  size="xs"
+                                  color="indigo"
+                                  variant="filled"
+                                >
+                                  SpeedGrader
+                                </Button>
+                              )}
+                            </Group>
+                          </Group>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  )}
+                </div>
+
+                {/* Grading Completed Section */}
+                <Paper p="sm" withBorder>
+                  <Group
+                    justify="space-between"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setCompletedGradingOpen((open) => !open)}
+                  >
+                    <Group gap="xs">
+                      <Title order={2} size="h4">
+                        Grading Completed
+                      </Title>
+                      <Badge color="green" variant="light" size="sm">
+                        {isaBuckets.completedGrading.length} assignments • 0
+                        pending
+                      </Badge>
+                    </Group>
+                    <Text size="sm" c="dimmed">
+                      {completedGradingOpen ? "▲" : "▼"}
+                    </Text>
+                  </Group>
+
+                  {completedGradingOpen && (
+                    <Stack gap="xs" mt="sm">
+                      {isaBuckets.completedGrading.length === 0 ? (
+                        <Text c="dimmed" size="sm">
+                          No completed grading records.
+                        </Text>
+                      ) : (
+                        isaBuckets.completedGrading.map((item) => (
+                          <Paper
+                            key={item.id}
+                            p="xs"
+                            withBorder
+                            style={{ backgroundColor: "#161616" }}
+                          >
+                            <Group justify="space-between" align="center">
+                              <Group gap="xs">
+                                <Badge size="xs" color="blue" variant="light">
+                                  {courseNameById.get(item.course_id) ??
+                                    "Unknown course"}
+                                </Badge>
+                                <Text size="sm" c="dimmed" fw={500}>
+                                  {item.title}
+                                </Text>
+                              </Group>
+                              <Group gap="xs">
+                                <Badge size="xs" color="green" variant="light">
+                                  All Graded
+                                </Badge>
+                                {item.speedgrader_url !== null && (
+                                  <Button
+                                    component="a"
+                                    href={item.speedgrader_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    size="compact-xs"
+                                    variant="default"
+                                  >
+                                    Review Grades
+                                  </Button>
+                                )}
+                              </Group>
+                            </Group>
+                          </Paper>
+                        ))
+                      )}
+                    </Stack>
+                  )}
+                </Paper>
+              </Stack>
+
+              {/* Right Column: Persistent ISA TODOs */}
+              <Paper
+                p="sm"
+                withBorder
+                style={{ position: "sticky", top: "24px" }}
+              >
+                <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Title order={3} size="h5">
+                      ISA Quick Tasks
+                    </Title>
+                    <Text size="xs" c="dimmed">
+                      Stored Locally
+                    </Text>
+                  </Group>
+
+                  <Group gap="xs" wrap="nowrap">
+                    <TextInput
+                      aria-label="Add an ISA task"
+                      placeholder="Add an ISA task..."
+                      size="sm"
+                      value={newTodoText}
+                      onChange={(event) =>
+                        setNewTodoText(event.currentTarget.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          void handleAddTodo();
+                        }
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => void handleAddTodo()}
+                      disabled={newTodoText.trim() === ""}
+                    >
+                      Add
+                    </Button>
+                  </Group>
+
+                  <Stack
+                    gap={6}
+                    style={{ maxHeight: "420px", overflowY: "auto" }}
+                  >
+                    {isaTodos.length === 0 ? (
+                      <Text c="dimmed" size="xs">
+                        No tasks yet. Add a quick reminder above.
+                      </Text>
+                    ) : (
+                      isaTodos.map((todo) => (
+                        <Paper
+                          key={todo.id}
+                          p={6}
+                          withBorder
+                          style={{ backgroundColor: "#141414" }}
+                        >
+                          <Group justify="space-between" wrap="nowrap">
+                            <Checkbox
+                              checked={todo.completed}
+                              onChange={(event) =>
+                                void toggleIsaTodo(
+                                  database,
+                                  todo.id,
+                                  event.currentTarget.checked,
+                                )
+                              }
+                              label={
+                                <Text
+                                  size="sm"
+                                  style={{
+                                    textDecoration: todo.completed
+                                      ? "line-through"
+                                      : "none",
+                                    color: todo.completed
+                                      ? "var(--mantine-color-dimmed)"
+                                      : "inherit",
+                                  }}
+                                >
+                                  {todo.text}
+                                </Text>
+                              }
+                            />
+                            <ActionIcon
+                              color="red"
+                              variant="subtle"
+                              size="sm"
+                              aria-label={`Delete ${todo.text}`}
+                              onClick={() =>
+                                void deleteIsaTodo(database, todo.id)
+                              }
+                            >
+                              ✕
+                            </ActionIcon>
+                          </Group>
+                        </Paper>
+                      ))
+                    )}
+                  </Stack>
+
+                  <Group
+                    justify="space-between"
+                    pt="xs"
+                    style={{ borderTop: "1px solid #2a2a2a" }}
+                  >
+                    <Text size="xs" c="dimmed">
+                      {openTodosCount} open • {completedTodosCount} completed
+                    </Text>
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
+                      color="dimmed"
+                      onClick={() => void clearCompletedIsaTodos(database)}
+                    >
+                      Clear completed
+                    </Button>
+                  </Group>
+                </Stack>
+              </Paper>
+            </div>
           </Tabs.Panel>
           <Tabs.Panel value="announcements" pt="md">
             <Stack gap="md">

@@ -8,6 +8,7 @@ import type {
   AnnouncementRecord,
   CoursePreference,
   CourseRecord,
+  IsaAssignmentRecord,
   ItemState,
   SyncMetadata,
 } from "../domain/models";
@@ -247,7 +248,10 @@ export function selectAnnouncementsByCourse(
   const statesById = indexItemStates(itemStates);
 
   return courses
-    .filter((course) => enabledCourseIds.has(course.id))
+    .filter(
+      (course) =>
+        course.enrollment_type !== "ta" && enabledCourseIds.has(course.id),
+    )
     .sort((left, right) =>
       (left.course_code || left.name).localeCompare(
         right.course_code || right.name,
@@ -301,14 +305,16 @@ export function selectHiddenAnnouncements(
 ): HiddenAnnouncementView[] {
   const enabledCourseIds = getEnabledCourseIds(preferences);
   const statesById = indexItemStates(itemStates);
+  const studentCourses = courses.filter((c) => c.enrollment_type !== "ta");
   const courseNameById = new Map(
-    courses.map((course) => [course.course_id, course.name]),
+    studentCourses.map((course) => [course.course_id, course.name]),
   );
 
   return announcements
     .filter(
       (announcement) =>
         enabledCourseIds.has(getCourseRecordId(announcement.course_id)) &&
+        studentCourses.some((c) => c.course_id === announcement.course_id) &&
         getRecordState(
           statesById,
           "announcement",
@@ -354,4 +360,67 @@ export function shouldShowStaleWarning(
   }
 
   return now.getTime() - lastSuccessTime > STALE_AFTER_MS;
+}
+
+export interface IsaGradingBucketsView {
+  toBeGraded: IsaAssignmentRecord[];
+  completedGrading: IsaAssignmentRecord[];
+  totalToGradeCount: number;
+  totalSubmissionsPending: number;
+}
+
+export interface IsaGradingFilters {
+  course_ids: string[];
+  title_query: string;
+}
+
+/**
+ * Partitions ISA assignments into 'To Be Graded' and 'Grading Completed' buckets.
+ *
+ * @param assignments - Raw ISA assignment records.
+ * @param filters - Active course and search query filters.
+ * @returns Partitioned ISA grading views and counts.
+ */
+export function selectIsaGradingBuckets(
+  assignments: IsaAssignmentRecord[],
+  filters: IsaGradingFilters = { course_ids: [], title_query: "" },
+): IsaGradingBucketsView {
+  const selectedCourses = new Set(filters.course_ids);
+  const titleQuery = filters.title_query.trim().toLocaleLowerCase();
+
+  const filtered = assignments.filter((item) => {
+    const matchesCourse =
+      selectedCourses.size === 0 || selectedCourses.has(item.course_id);
+    const matchesTitle =
+      titleQuery === "" || item.title.toLocaleLowerCase().includes(titleQuery);
+    return matchesCourse && matchesTitle;
+  });
+
+  const toBeGraded = filtered
+    .filter((item) => item.needs_grading_count > 0)
+    .sort((left, right) => {
+      const leftDue = left.due_at ? Date.parse(left.due_at) : Infinity;
+      const rightDue = right.due_at ? Date.parse(right.due_at) : Infinity;
+      return leftDue - rightDue || left.title.localeCompare(right.title);
+    });
+
+  const completedGrading = filtered
+    .filter((item) => item.needs_grading_count === 0)
+    .sort((left, right) => {
+      const leftDue = left.due_at ? Date.parse(left.due_at) : -Infinity;
+      const rightDue = right.due_at ? Date.parse(right.due_at) : -Infinity;
+      return rightDue - leftDue || left.title.localeCompare(right.title);
+    });
+
+  const totalSubmissionsPending = toBeGraded.reduce(
+    (sum, item) => sum + item.needs_grading_count,
+    0,
+  );
+
+  return {
+    completedGrading,
+    toBeGraded,
+    totalSubmissionsPending,
+    totalToGradeCount: toBeGraded.length,
+  };
 }

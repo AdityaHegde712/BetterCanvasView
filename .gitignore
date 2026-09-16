@@ -1,5 +1,8 @@
 # Local planning artifacts
-.agent-tasks/
+!.agent-tasks/
+.agent-tasks/**
+!.agent-tasks/**/
+!.agent-tasks/**/*.md
 
 # Local secrets
 .env

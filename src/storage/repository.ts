@@ -9,6 +9,8 @@ import type {
   AgendaItemRecord,
   AnnouncementRecord,
   CourseRecord,
+  IsaAssignmentRecord,
+  IsaTodoRecord,
   SyncMetadata,
 } from "../domain/models";
 import { CanvasDatabase } from "./database";
@@ -23,6 +25,7 @@ export interface RemoteSnapshotInput {
   courses: CourseRecord[];
   agenda_items: RemoteAgendaItem[];
   announcements: AnnouncementRecord[];
+  isa_assignments?: IsaAssignmentRecord[];
 }
 
 /**
@@ -42,11 +45,14 @@ export async function replaceRemoteSnapshot(
 
   await database.transaction(
     "rw",
-    database.courses,
-    database.agenda_items,
-    database.announcements,
-    database.course_preferences,
-    database.sync_metadata,
+    [
+      database.courses,
+      database.agenda_items,
+      database.announcements,
+      database.course_preferences,
+      database.sync_metadata,
+      database.isa_assignments,
+    ],
     async () => {
       const existingPreferences = await database.course_preferences.bulkGet(
         snapshot.courses.map(({ id }) => id),
@@ -58,9 +64,13 @@ export async function replaceRemoteSnapshot(
       await database.courses.clear();
       await database.agenda_items.clear();
       await database.announcements.clear();
+      await database.isa_assignments.clear();
       await database.courses.bulkPut(snapshot.courses);
       await database.agenda_items.bulkPut(agendaItems);
       await database.announcements.bulkPut(snapshot.announcements);
+      if (snapshot.isa_assignments && snapshot.isa_assignments.length > 0) {
+        await database.isa_assignments.bulkPut(snapshot.isa_assignments);
+      }
       await database.course_preferences.bulkPut(newPreferences);
       if (metadata !== undefined) {
         await database.sync_metadata.put(metadata);
@@ -129,7 +139,81 @@ export async function clearAllData(database: CanvasDatabase): Promise<void> {
     await database.course_preferences.clear();
     await database.item_states.clear();
     await database.sync_metadata.clear();
+    await database.isa_assignments.clear();
+    await database.isa_todos.clear();
   });
+}
+
+/**
+ * Adds a new persistent ISA quick todo item.
+ *
+ * @param database - The Canvas database to update.
+ * @param text - Description of the task.
+ * @returns The newly created todo record.
+ */
+export async function addIsaTodo(
+  database: CanvasDatabase,
+  text: string,
+): Promise<IsaTodoRecord> {
+  const record: IsaTodoRecord = {
+    completed: false,
+    created_at: new Date().toISOString(),
+    id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
+    text: text.trim(),
+  };
+
+  await database.isa_todos.put(record);
+  return record;
+}
+
+/**
+ * Toggles completion status for an ISA quick todo item.
+ *
+ * @param database - The Canvas database to update.
+ * @param id - The stable todo item identifier.
+ * @param completed - New completion status.
+ * @returns A promise that resolves after the update.
+ */
+export async function toggleIsaTodo(
+  database: CanvasDatabase,
+  id: string,
+  completed: boolean,
+): Promise<void> {
+  await database.isa_todos.update(id, { completed });
+}
+
+/**
+ * Deletes an ISA quick todo item by ID.
+ *
+ * @param database - The Canvas database to update.
+ * @param id - The stable todo item identifier.
+ * @returns A promise that resolves after deletion.
+ */
+export async function deleteIsaTodo(
+  database: CanvasDatabase,
+  id: string,
+): Promise<void> {
+  await database.isa_todos.delete(id);
+}
+
+/**
+ * Deletes all completed ISA quick todo items.
+ *
+ * @param database - The Canvas database to update.
+ * @returns A promise that resolves after completed items are deleted.
+ */
+export async function clearCompletedIsaTodos(
+  database: CanvasDatabase,
+): Promise<void> {
+  const completedItems = await database.isa_todos
+    .filter((todo) => todo.completed === true)
+    .toArray();
+  if (completedItems.length > 0) {
+    await database.isa_todos.bulkDelete(completedItems.map(({ id }) => id));
+  }
 }
 
 /**

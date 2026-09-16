@@ -6,7 +6,9 @@ import type {
   AgendaItemRecord,
   AgendaItemType,
   AnnouncementRecord,
+  CourseEnrollmentType,
   CourseRecord,
+  IsaAssignmentRecord,
 } from "./models";
 import { isSubmissionComplete } from "./submissions";
 import { getTrustedCanvasUrl } from "../security/canvas-links";
@@ -21,6 +23,45 @@ type CanvasObject = Record<string, unknown>;
  */
 function isCanvasObject(value: unknown): value is CanvasObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Determines enrollment type based on Canvas course enrollments array.
+ *
+ * @param course - Canvas course object.
+ * @returns CourseEnrollmentType or undefined if enrollments is absent.
+ */
+function getCourseEnrollmentType(
+  course: CanvasObject,
+): CourseEnrollmentType | undefined {
+  if (!Array.isArray(course.enrollments)) {
+    return undefined;
+  }
+
+  const hasTaEnrollment = course.enrollments.some(
+    (enrollment) =>
+      isCanvasObject(enrollment) &&
+      (enrollment.type === "ta" ||
+        enrollment.role === "TaEnrollment" ||
+        enrollment.type === "teacher"),
+  );
+
+  if (hasTaEnrollment) {
+    return "ta";
+  }
+
+  const hasStudentEnrollment = course.enrollments.some(
+    (enrollment) =>
+      isCanvasObject(enrollment) &&
+      (enrollment.type === "student" ||
+        enrollment.role === "StudentEnrollment"),
+  );
+
+  if (hasStudentEnrollment) {
+    return "student";
+  }
+
+  return undefined;
 }
 
 /**
@@ -121,6 +162,7 @@ export function normalizeCourse(course: unknown): CourseRecord {
   }
 
   const courseId = normalizeIdentifier(course.id, "course.id");
+  const enrollmentType = getCourseEnrollmentType(course);
 
   return {
     course_code: getString(course, "course_code"),
@@ -129,6 +171,9 @@ export function normalizeCourse(course: unknown): CourseRecord {
     id: `${courseId}:${courseId}`,
     name: getString(course, "name"),
     object_id: courseId,
+    ...(enrollmentType !== undefined
+      ? { enrollment_type: enrollmentType }
+      : {}),
   };
 }
 
@@ -213,5 +258,58 @@ export function normalizeAnnouncement(
     object_id: announcementId,
     posted_at: getNullableString(announcement, "posted_at"),
     title: getString(announcement, "title"),
+  };
+}
+
+/**
+ * Normalizes a Canvas assignment for an ISA course.
+ *
+ * @param course - Unknown Canvas course payload.
+ * @param assignment - Unknown Canvas assignment payload.
+ * @returns Normalized ISA assignment record.
+ * @throws {TypeError} If required identifiers are missing.
+ */
+export function normalizeIsaAssignment(
+  course: unknown,
+  assignment: unknown,
+): IsaAssignmentRecord {
+  if (!isCanvasObject(course)) {
+    throw new TypeError("course must be a Canvas-shaped object.");
+  }
+
+  if (!isCanvasObject(assignment)) {
+    throw new TypeError("assignment must be a Canvas-shaped object.");
+  }
+
+  const courseId = normalizeIdentifier(course.id, "course.id");
+  const assignmentId = normalizeIdentifier(assignment.id, "assignment.id");
+  const title = getString(assignment, "name") || getString(assignment, "title");
+  const needsGradingCount =
+    typeof assignment.needs_grading_count === "number" &&
+    Number.isFinite(assignment.needs_grading_count) &&
+    assignment.needs_grading_count >= 0
+      ? assignment.needs_grading_count
+      : 0;
+  const pointsPossible =
+    typeof assignment.points_possible === "number" &&
+    Number.isFinite(assignment.points_possible)
+      ? assignment.points_possible
+      : null;
+
+  const rawHtmlUrl = getString(assignment, "html_url");
+  const trustedHtmlUrl = getTrustedCanvasUrl(rawHtmlUrl);
+  const speedgraderRawUrl = `https://sjsu.instructure.com/courses/${courseId}/gradebook/speed_grader?assignment_id=${assignmentId}`;
+  const speedgraderUrl = getTrustedCanvasUrl(speedgraderRawUrl);
+
+  return {
+    course_id: courseId,
+    due_at: getNullableString(assignment, "due_at"),
+    html_url: trustedHtmlUrl,
+    id: `${courseId}:${assignmentId}`,
+    needs_grading_count: needsGradingCount,
+    object_id: assignmentId,
+    points_possible: pointsPossible,
+    speedgrader_url: speedgraderUrl,
+    title,
   };
 }

@@ -76,8 +76,7 @@ describe("SyncService", () => {
         path: "/api/v1/courses",
         query: {
           enrollment_state: "active",
-          enrollment_type: "student",
-          "include[]": "term",
+          "include[]": ["term", "enrollments"],
           per_page: 100,
         },
       },
