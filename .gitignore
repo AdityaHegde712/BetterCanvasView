@@ -1,7 +1,24 @@
 # Local planning artifacts
-.agent-tasks/
+!.agent-tasks/
+.agent-tasks/*.md
+!.agent-tasks/**/
+!.agent-tasks/v*/*.md
 
 # Local secrets
 .env
 .env.*
 !.env.example
+
+# Node and WXT outputs
+node_modules/
+.wxt/
+.output/
+dist/
+*.log
+
+# Browser test outputs
+playwright-report/
+test-results/
+coverage/
+tests/sample_download/
+

@@ -1,0 +1,57 @@
+{
+  "course": {
+    "id": 101,
+    "name": "Software Design",
+    "course_code": "CMPE 100",
+    "workflow_state": "available",
+    "html_url": "https://sjsu.instructure.com/courses/101"
+  },
+  "assignments": {
+    "assignment": {
+      "id": 201,
+      "name": "Module exercise",
+      "due_at": "2026-02-20T18:00:00Z",
+      "points_possible": 25,
+      "html_url": "https://sjsu.instructure.com/courses/101/assignments/201",
+      "submission": {
+        "workflow_state": "unsubmitted",
+        "late": false,
+        "missing": false
+      }
+    },
+    "discussion": {
+      "id": 202,
+      "name": "Weekly discussion",
+      "submission_types": ["discussion_topic"],
+      "html_url": "https://sjsu.instructure.com/courses/101/assignments/202"
+    },
+    "classic_quiz": {
+      "id": 203,
+      "name": "Classic quiz",
+      "quiz_id": 303,
+      "is_quiz_assignment": true,
+      "html_url": "https://sjsu.instructure.com/courses/101/assignments/203"
+    },
+    "new_quiz": {
+      "id": 204,
+      "name": "New quiz",
+      "is_quiz_lti_assignment": true,
+      "html_url": "https://sjsu.instructure.com/courses/101/assignments/204"
+    },
+    "external_tool": {
+      "id": 205,
+      "name": "External lab",
+      "external_tool_tag_attributes": {
+        "url": "https://tool.example.invalid/launch"
+      },
+      "html_url": "https://sjsu.instructure.com/courses/101/assignments/205"
+    }
+  },
+  "announcement": {
+    "id": 401,
+    "title": "Project update",
+    "message": "<p>Milestone posted.</p>",
+    "posted_at": "2026-02-18T18:00:00Z",
+    "html_url": "https://sjsu.instructure.com/courses/101/discussion_topics/401"
+  }
+}
